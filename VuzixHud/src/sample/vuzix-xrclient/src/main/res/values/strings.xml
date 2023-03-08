@@ -5,9 +5,11 @@
     <string name="title_chat">Message</string>
     <string name="connect">Connect</string>
     <string name="disconnect">Disconnect</string>
+    <string name="disconnected">Disconnected</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
-    <string name="connecting">Connecting</string>
+    <string name="connecting">Connecting to server</string>
+    <string name="connected">Connected. Waiting for incoming call.</string>
     <string name="user_id">User Id</string>
     <string name="please_input_user_id">Please input user id</string>
     <string name="please_input_server_url">Please input server url</string>
@@ -25,5 +27,8 @@
     <string name="owt_p2p">OWT P2P</string>
     <string name="only_on_mseries">This app is intented for the Vuzix M-Series smart glasses</string>
     <string name="changeRemoteView">Changing Main Display View</string>
+    <string name="default_message">WebRTC Demo</string>
+    <string name="bad_qr_scanned">Incorrect QR code</string>
+    <string name="failed_connect">Failed to connect</string>
 
 </resources>

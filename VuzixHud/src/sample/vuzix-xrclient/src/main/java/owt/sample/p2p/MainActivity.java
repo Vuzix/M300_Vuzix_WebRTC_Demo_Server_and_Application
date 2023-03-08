@@ -36,6 +36,7 @@ import android.view.KeyEvent;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.vuzix.sdk.barcode.ScanResult;
@@ -99,6 +100,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     EglBase rootEglBase;
 
     private CallFragment callFragment;
+    private TextView messageText;
     private SurfaceViewRenderer localRenderer, remoteRenderer;
     private P2PClient p2PClient;
     private Publication publication;
@@ -208,6 +210,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         serverText = new EditText(this);
         myIdText = new EditText(this);
         peerIdText = new EditText(this);
+        messageText = findViewById(R.id.mainWindowMessage);
 
         AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
@@ -259,33 +262,40 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
         catch (RuntimeException ex)
         {
-            ex.printStackTrace();
+            Log.e(TAG, "Could not initP2PClient. ", ex);
         }
-
     }
 
-    private void switchFragment(Fragment fragment) {
-        getSupportFragmentManager().beginTransaction()
-                .replace(R.id.fragment_container, fragment)
-                .commitAllowingStateLoss();
-
+    private void switchFragment(final Fragment fragment, final boolean showMessage) {
+        runOnUiThread( () -> {
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.fragment_container, fragment)
+                    .commitAllowingStateLoss();
+            if (showMessage) {
+                messageText.setVisibility(TextView.VISIBLE);
+            } else {
+                messageText.setVisibility(TextView.GONE);
+            }
+        });
     }
 
     private void requestPermission() {
-        String[] permissions = new String[]{Manifest.permission.CAMERA,
-                Manifest.permission.RECORD_AUDIO};
+        runOnUiThread( () -> {
+            String[] permissions = new String[]{Manifest.permission.CAMERA,
+                    Manifest.permission.RECORD_AUDIO};
 
-        for (String permission : permissions) {
-            if (ContextCompat.checkSelfPermission(MainActivity.this,
-                    permission) != PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(MainActivity.this,
-                        permissions,
-                        OWT_REQUEST_CODE);
-                return;
+            for (String permission : permissions) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this,
+                        permission) != PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            permissions,
+                            OWT_REQUEST_CODE);
+                    Log.d(TAG, "Need permission");
+                    return;
+                }
+                onConnectSucceed();
             }
-        }
-
-        onConnectSucceed();
+        });
     }
 
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
@@ -299,21 +309,31 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void onConnectSucceed() {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Log.d(TAG, "onConnectSucceed");
+        runOnUiThread( () -> {
+            Log.d(TAG, "onConnectSucceed");
+            messageText.setVisibility(TextView.VISIBLE);
+            messageText.setText(R.string.connected);
+        });
+    }
+
+    private void onConnectFailed(final String messageIn) {
+        runOnUiThread( () -> {
+            String reason = messageIn;
+            Log.e(TAG, "Connect failed: " + reason);
+            if ((reason == null) || reason.length() == 0) {
+                reason = getString(R.string.failed_connect);
             }
+            Toast.makeText(this,reason, Toast.LENGTH_SHORT).show();
+            messageText.setText(R.string.failed_connect);
+            finish();
         });
     }
 
     @Override
     public void onServerDisconnected() {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Log.d(TAG, "onServerDisconnect");
-            }
+        runOnUiThread( ()-> {
+            messageText.setText(R.string.disconnected);
+            Log.d(TAG, "onServerDisconnect");
         });
     }
 
@@ -346,24 +366,26 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void connectRequest(final String server, final String myId) {
+        messageText.setText(R.string.connecting);
         executor.execute(() -> {
             JSONObject loginObj = new JSONObject();
             try {
                 loginObj.put("host", server);
                 loginObj.put("token", myId);
             } catch (JSONException e) {
-                e.printStackTrace();
+                Log.e(TAG, "Could not make json request. ", e);
             }
             p2PClient.addAllowedRemotePeer(myId);
             p2PClient.connect(loginObj.toString(), new ActionCallback<String>() {
                 @Override
                 public void onSuccess(String result) {
+                    Log.d(TAG, "P2P connected");
                     requestPermission();
                 }
 
                 @Override
                 public void onFailure(OwtError error) {
-                    Log.e(TAG, error.errorMessage);
+                    onConnectFailed(error.errorMessage);
                 }
             });
         });
@@ -379,10 +401,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                         JSONObject p2pConnectObject = new JSONObject(result.getText());
                         final String connectURL = "http://" + p2pConnectObject.getString("ipaddr") + ":" + p2pConnectObject.getInt("port");
                         final String myId = p2pConnectObject.getString("devid");
+                        Log.d(TAG, "Scanned QR code. Connecting as: " + myId + " to: " + connectURL);
                         connectRequest(connectURL, myId);
                     } catch (JSONException e) {
                         Log.e(TAG, "QR Connect Failed: " + e.getMessage());
-                        Toast.makeText(this, "Incorrect QR Code scanned", Toast.LENGTH_SHORT).show();
+                        onConnectFailed(getString(R.string.bad_qr_scanned));
                     }
 
                 }
@@ -403,7 +426,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             if (callFragment == null) {
                 callFragment = new CallFragment();
             }
-            switchFragment(callFragment);
+            switchFragment(callFragment, false);
 
             message = peerHandler.obtainMessage();
             message.what = INVITE;
@@ -556,11 +579,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             }
 
 
-            runOnUiThread(new Runnable() {
-                public void run() {
-                    if(callFragment != null) {
-                        callFragment.updateDisplay(drawObjectList);
-                    }
+            runOnUiThread( () -> {
+                if(callFragment != null) {
+                    callFragment.updateDisplay(drawObjectList);
                 }
             });
 
@@ -626,10 +647,8 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             if (sHandler.compareTo("message")==0){
                 final String fn = data.getString("dispname");
                 final String fmsg = data.getString("data");
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        Toast.makeText(MainActivity.this,"" + fn + ": " + fmsg, Toast.LENGTH_LONG).show();
-                    }
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this,"" + fn + ": " + fmsg, Toast.LENGTH_LONG).show();
                 });
 
             }else if(sHandler.compareTo("request")==0){
@@ -661,7 +680,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     Log.d(TAG, "Invited by portal");
                     String requesterId = data.getString("dispname");
                     p2PClient.removeAllowedRemotePeer(peerId);
-
                     callRequest(requesterId);
 
                 }else if(cmd.compareTo("uninvite")==0){
@@ -778,11 +796,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     break;
                 case INVITE:
                     Log.d(TAG, "handleMessage: INVITE");
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(MainActivity.this,
-                                    "onConnect Started ", Toast.LENGTH_SHORT).show();
-                        }
+                    runOnUiThread( ()-> {
+                        Toast.makeText(MainActivity.this,
+                                "onConnect Started ", Toast.LENGTH_SHORT).show();
                     });
 
 
@@ -837,11 +853,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     break;
                 case DISCONNECT:
                     Log.d(TAG, "handleMessage: DISCONNECT");
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(MainActivity.this,
-                                    "onConnect Stopped", Toast.LENGTH_SHORT).show();
-                        }
+                    runOnUiThread( () -> {
+                        Toast.makeText(MainActivity.this,
+                                "onConnect Stopped", Toast.LENGTH_SHORT).show();
                     });
 
 
@@ -856,7 +870,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             @Override
                             public void onSuccess(Void aVoid) {
                                 Log.d(TAG, "Sent Disconnect Successfully");
-
+                                onConnectSucceed();
                             }
 
                             @Override
